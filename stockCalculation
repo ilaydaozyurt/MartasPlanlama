@@ -1,7 +1,215 @@
-echo "# MartasPlanlama" >> README.md
-  git init
-  git add README.md
-  git commit -m "first commit"
-  git branch -M main
-  git remote add origin https://github.com/ilaydaozyurt/MartasPlanlama.git
-  git push -u origin main
+"""
+Toplam Stok Raporu hazırlanması için kullanılır.
+
+Girdi: Detay Stok Raporları (10 depo için ikişer tane, 10. depo için bir tane olmak üzere 21 .xlsx dosyası)
+Çıktı: Toplam Stok Raporu (Toplam_Stok.xlsx)
+
+Yeni depo eklenmesi durumunda güncellenmesi gerekir. Girdi formatı deponumarası.xlsx formatında olmalıdır.
+Güncel depolar: Gebze, Avrupa, Ankara, Bursa, İzmir, Samsun, Adana, Antalya, Diyarbakır, Erzurum, Güzeller (Yalnızca ana depo)
+
+Not: read_files fonksiyonundaki folder_path'in her bir kullanıcı tarafından güncellenmesi gerekmektedir.
+
+Tarih: 21.07.23
+"""
+from datetime import date
+import pandas as pd
+import os
+import openpyxl
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font, Alignment, Border, Side
+
+
+def read_files(custom_order):
+    """
+    .xlsx uzantılı dosyaları belirlenen sırayla okur.
+    :return: Tüm .xlsx dosyalarını içeren liste.
+    """
+
+    data = []
+    today_date = date.today().strftime("%d.%m.%y")
+    folder_path = os.path.join(r"C:\Users\ilayda.ozyurt\Desktop", today_date + "_Detay Stok")
+
+    # Dosyadaki tüm dosyaları okuyup yalnızca .xlsx uzantılı dosyaları alıyor. Data isimli listeye sırayla dosyaları
+    # ekliyor. Böylece data, listeleri tutan liste oluyor.
+    for file_name in custom_order:
+        file_path = os.path.join(folder_path, f"{file_name}.xlsx")
+        if os.path.exists(file_path):
+            print("Dosya okunuyor: " + file_path)
+            df = pd.read_excel(file_path)
+            data.append(df)
+        else:
+            print(f"Uyarı:'{file_path}' Dosyası bulunamadı. Atlanıyor.")
+    return data
+
+
+def clean_file(data, index):
+    """
+    Data listesinde bulunma sıralarına göre dosyaların depo ya da yol olduğuna karar veriyoruz. Artan sırayla sıralanmış
+    dosya verildiğinde, data listesinde çift indekslerde bulunan dosyalar depo dosyası, tek indekslerde bulunan dosyalar
+    yol dosyası oluyor. (Bunu yapıyorum çünkü iki dosya farklı işlemler görüyor, depo dosyasını temizlememiz gerekiyor.)
+    :param data: read_files fonksiyonunun return ettiği tüm .xlsx dosyalarını içeren liste.
+    :param index: data listesi içindeki dosyaların bulunduğu index. (Gebze'nin mal deposu 0, yol deposu 1. indexte gibi)
+    :return: df: Temizlenmiş .xlsx dosyası.
+    """
+    if index % 2 == 0:
+        df = data[index]
+
+        # Adres ve Adres tipi sütunlarını büyük harfle yaz.
+        df["ADRES"] = df["ADRES"].str.upper()
+        df["ADRES_TIPI"] = df["ADRES_TIPI"].str.upper()
+
+        # Adresten ve adres tipinden satırların silinmesi
+        values_to_delete_adres = ["T", "KARANTINA", "ZIHRACAT"]
+        df = df[~df["ADRES"].isin(values_to_delete_adres)]
+        values_to_delete_tip = ["X"]
+        df = df[~df["ADRES_TIPI"].isin(values_to_delete_tip)]
+    else:
+        df = data[index]
+        return df
+    return df
+
+
+def pivot_table(df):
+    """
+    Verilen (temizlenmiş) dosyada index'i stok kodu, değerleri miktar olacak şekilde pivot yapar.
+    :param df: Depo stok dosyası.
+    :return: Dosyanın pivot table uygulanmış versiyonu.
+    """
+    pivot_df = df.pivot_table(values="MIKTAR", index="STOK_KODU", aggfunc="sum")
+
+    return pivot_df
+
+
+def total_per_dm(data):
+    """
+    Her depo için (temizlenmiş) ana+yol dosyasını birleştirip, üzerine pivot uygulanmış halini döndürür.
+    :param data: read_files fonksiyonunun return ettiği tüm .xlsx dosyalarını içeren liste.
+    :return: combined_df: ana+yol depo dosyasının birleştirilmiş hali
+             all_pivots: datadaki tüm depoların pivot table uygulanmış halini liste olarak verir.
+    """
+    counter = 1
+    # pivot_stock = pd.DataFrame()
+    all_pivots = []
+
+    for i in range(1, len(data)):
+        if counter % 2 != 0:
+            counter += 1
+            list1 = clean_file(data, i - 1)
+            list2 = clean_file(data, i)
+            df1 = pd.DataFrame(list1)
+            df2 = pd.DataFrame(list2)
+            combined_df = pd.concat([df1, df2], ignore_index=True)
+            pivot_stock = pivot_table(combined_df)
+            print("Depo stokları hesaplanıyor.")
+
+            all_pivots.append(pivot_stock)
+
+        else:
+            counter += 1
+        # Yeni depo açılması durumunda güncellenmeli.
+        if i == 20:
+            list1 = clean_file(data, 20)
+            df1 = pd.DataFrame(list1)
+            pivot_stock = pivot_table(df1)
+            print("Depo stokları hesaplanıyor.")
+            all_pivots.append(pivot_stock)
+    return all_pivots
+
+
+def create_worksheets(sheet_names):
+    """
+    Excel Workbook'da belirlenen isimlerde sheetler oluşturur.
+    :param sheet_names: Verilen sheet isimleri.
+    :return: wb: Excel Workbook (.xlsx dosyası)
+    """
+    wb = openpyxl.Workbook()
+
+    ws = wb["Sheet"]
+    wb.remove(ws)
+
+    for name in sheet_names:
+        wb.create_sheet(name)
+    today = date.today()
+    d1 = today.strftime("%d.%m.%y")
+    wb.save(d1 + "_Toplam_Stok.xlsx")
+    return wb
+
+
+def add_toplam_sheet(wb, pivot_stocks):
+    toplam_df = pd.concat(pivot_stocks, axis=0).groupby(level=0).sum()
+
+    ws = wb.create_sheet("Toplam")
+
+    rows = dataframe_to_rows(toplam_df)
+    thin = Side(border_style="thin")
+    bold_font = Font(bold=True)
+    print("Toplam stok bilgisi giriliyor. ")
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            cell_rc = ws.cell(row=r_idx, column=c_idx, value=value)
+            cell_rc.alignment = Alignment(horizontal="center", vertical="center")
+            cell_rc.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+    wb.worksheets[11].delete_rows(idx=1)
+    ws["B1"] = "MIKTAR"
+    ws["A1"].font = bold_font
+    ws["B1"].font = bold_font
+    ws["B1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["B1"].border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+    ws.column_dimensions["A"].width = 20
+
+
+# .xlsx dosyalarının okunduğu sırayı verir. (Yeni depo eklenmesi durumunda güncellenmeli. Güzeller depo yol stok
+# bilgisini almadığımız için en sonda olmalı.)
+custom_order = ["1", "11", "40", "41", "50", "51", "130", "131", "30", "31", "80", "81", "70", "71", "90", "91",
+                "110", "111", "150", "151", "140"]
+
+# Sheetlere verilmek istenen isimler. (Yeni depo eklenmesi durumunda güncellenmeli.  Güzeller depo yol stok
+# # bilgisini almadığımız için en sonda olmalı.)
+sheet_names = ["Gebze", "Avrupa", "Ankara", "Bursa", "İzmir", "Samsun", "Adana", "Antalya", "Diyarbakır", "Erzurum", "Güzeller"]
+
+wb = create_worksheets(sheet_names)
+data = read_files(custom_order)
+pivot_stocks = total_per_dm(data)
+
+
+def write_data(ind, pivot_stock):
+    """
+    .xlsx dosyasına verileri yazar.
+    :param ind: Sheet'in konumu/indexi
+    :param pivot_stock: pivot_stocks dosyasındaki her bir pivot stock.
+    :return: -
+    """
+    rows = dataframe_to_rows(pivot_stock)
+    thin = Side(border_style="thin")
+    bold_font = Font(bold=True)
+    for r_idx, row in enumerate(rows, 1):
+        for c_idx, value in enumerate(row, 1):
+            cell_rc = wb.worksheets[ind].cell(row=r_idx, column=c_idx, value=value)
+            cell_rc.alignment = Alignment(horizontal="center", vertical="center")
+            cell_rc.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+    wb.worksheets[ind].delete_rows(idx=1)
+    wb.worksheets[ind]["B1"] = "MIKTAR"
+    wb.worksheets[ind]["A1"].font = bold_font
+    wb.worksheets[ind]["B1"].font = bold_font
+    wb.worksheets[ind]["B1"].alignment = Alignment(horizontal="center", vertical="center")
+    wb.worksheets[ind]["B1"].border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+    wb.worksheets[ind].column_dimensions["A"].width = 20
+
+
+# Pivot_stocks'daki her index/pivot stock için depo stok bilgisini .xlsx file'a yazar.
+for ind, pivot_stock in enumerate(pivot_stocks):
+    ws = sheet_names[ind]
+    print("Depo stok bilgisi giriliyor: " + ws)
+    write_data(ind, pivot_stock)
+
+add_toplam_sheet(wb, pivot_stocks)
+
+today = date.today()
+d1 = today.strftime("%d.%m.%y")
+
+print("Dosya kaydediliyor...")
+wb.save(filename=d1 + '_Toplam_Stok.xlsx')
