@@ -1,0 +1,107 @@
+"""
+Envanterlerin toplam ve serbest envanterini hesaplamak için kullanılır.
+
+Girdi: Evira'dan 10 adet Adres Durum Raporu.
+Çıktı: 3 satır 11 sütunluk envanter bilgisi matrisi (dd.mm.yy_WarehouseCapacity.xlsx)
+
+Yeni depo eklenmesi durumunda güncellenmesi gerekir. Klasör adı "dd.mm.yy_Kapasite" olmalıdır ve uzantısı .xlsx
+olmalıdır. Girdi formatı deponumarası.xlsx formatında olmalıdır.
+Güncel depolar: Gebze, Avrupa, Ankara, Bursa, İzmir, Samsun, Adana, Antalya, Diyarbakır, Erzurum
+
+Not: read_files fonksiyonundaki folder_path'in her bir kullanıcı tarafından güncellenmesi gerekmektedir.
+
+Tarih: 08.11.23
+"""
+from datetime import date
+import pandas as pd
+import os
+import openpyxl
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font, Alignment, Border, Side
+
+
+def read_files(custom_order):
+    """
+    .xlsx uzantılı dosyaları belirlenen sırayla okur.
+    :return: Tüm .xlsx dosyalarını içeren liste.
+    """
+
+    data = []
+    today_date = date.today().strftime("%d.%m.%y")
+    folder_path = os.path.join(r"C:\Users\ilayda.ozyurt\Desktop", today_date + "_Kapasite")
+
+    # Dosyadaki tüm dosyaları okuyup yalnızca .xlsx uzantılı dosyaları alıyor. Data isimli listeye sırayla dosyaları
+    # ekliyor. Böylece data, listeleri tutan liste oluyor.
+    for file_name in custom_order:
+        file_path = os.path.join(folder_path, f"{file_name}.xlsx")
+        if os.path.exists(file_path):
+            print("Dosya okunuyor: " + file_path)
+            df = pd.read_excel(file_path)
+            data.append(df)
+        else:
+            print(f"Uyarı:'{file_path}' Dosyası bulunamadı. Atlanıyor.")
+    return data
+
+
+def clean_file(data, index):
+    """
+    Dosyaları yalnızca ADRES_TIPI sütununda "TOPLAMA" kalacak şekilde temizler.
+    :param data: read_files fonksiyonunun return ettiği tüm .xlsx dosyalarını içeren liste.
+    :param index: data listesi içindeki dosyaların bulunduğu index.
+    :return: df: Temizlenmiş .xlsx dosyası.
+    """
+    df = data[index]
+
+    # Adres tipi sütununu büyük harfle yaz.
+
+    df["ADRES_TIPI"] = df["ADRES_TIPI"].str.upper()
+
+    # Adres tipinden satırların silinmesi
+
+    values_to_delete_tip = ["TOPLAMA"]
+    df = df[~df["ADRES_TIPI"].isin(values_to_delete_tip)]
+
+    return df
+
+
+def calculateCapacity(df):
+    total_cap = len(df.iloc[:, 2])
+    free_cap = (df['TOPLAM_MIKTAR'] == 0).sum()
+    return total_cap, free_cap
+
+
+# .xlsx dosyalarının okunduğu sırayı verir. (Yeni depo eklenmesi durumunda güncellenmeli.)
+custom_order = ["1", "40", "50", "130", "30", "80", "70", "90", "110", "150"]
+
+# Sheetlere verilmek istenen isimler. (Yeni depo eklenmesi durumunda güncellenmeli.)
+keys = ["Gebze", "Avrupa", "Ankara", "Bursa", "İzmir", "Samsun", "Adana", "Antalya", "Diyarbakır", "Erzurum"]
+
+data = read_files(custom_order)
+
+
+def outputCalculation(data):
+    cap_info = []
+    for i in range(len(data)):
+        df = clean_file(data, i)
+        calc = calculateCapacity(df)
+        cap_info.append(calc)
+    return cap_info
+
+
+values = outputCalculation(data)
+
+dictionary = {}
+for key, value in zip(keys, values):
+    dictionary[key] = value
+
+# DataFrame'e dönüştür
+df = pd.DataFrame(data=dictionary)
+first_col = ["Total Capacity", "Free Capacity"]
+df.insert(0, "", first_col)
+
+today = date.today()
+d1 = today.strftime("%d.%m.%y")
+
+# Excel'e dönüştür
+df.to_excel(d1 + "_WarehouseCapacity.xlsx", index=False)
+print(".xlsx çıktısı oluşturuldu.")
